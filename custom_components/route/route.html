@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0, private">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta http-equiv="Last-Modified" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Маршруты устройств</title>
+    <link rel="stylesheet" href="/local/route/resources/leaflet.css">
+    <script src="/local/route/resources/leaflet.js"></script>
+    <script src="/local/route/resources/leaflet.polylineDecorator.js"></script>
+    <style>
+        * {box-sizing: border-box;margin: 0;padding: 0;}
+        html, body, #map {width: 100%;height: 100vh;font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;}
+        body {background-color: #1a1a1a;color: #ffffff;}
+        .controls {position: absolute;top: 15px;right: 15px;z-index: 1000;background: rgba(26, 26, 26, 0.95);padding: 15px;border-radius: 8px;box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);backdrop-filter: blur(10px);border: 1px solid rgba(255, 255, 255, 0.1);}
+        .controls h3 {margin-bottom: 10px;color: #4a9eff;font-size: 14px;text-transform: uppercase;letter-spacing: 1px;}
+        .control-group {margin-bottom: 12px;}
+        .control-group:last-child {margin-bottom: 0;}
+        .control-group label {display: block;margin-bottom: 5px;font-size: 12px;color: #cccccc;font-weight: 500;}
+        select {width: 200px;padding: 8px 12px;background: #2a2a2a;border: 1px solid #444444;border-radius: 6px;color: #ffffff;font-size: 13px;cursor: pointer;transition: all 0.2s ease;}
+        select:hover {border-color: #4a9eff;background: #333333;}
+        select:focus {outline: none;border-color: #4a9eff;box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2);}
+        .loading {position: absolute;top: 50%;left: 50%;transform: translate(-50%, -50%);background: rgba(26, 26, 26, 0.95);padding: 20px;border-radius: 8px;color: #4a9eff;font-size: 14px;z-index: 1001;display: none;}
+        .error {position: absolute;top: 50%;left: 50%;transform: translate(-50%, -50%);background: rgba(220, 53, 69, 0.95);padding: 20px;border-radius: 8px;color: #ffffff;font-size: 14px;z-index: 1001;display: none;}
+        @media (max-width: 768px) {.controls {right: 10px;left: 10px;top: 10px;width: auto;}
+            select {width: 100%;margin-bottom: 8px;}}
+        .leaflet-tooltip {background: rgba(26, 26, 26, 0.95);color: #ffffff;border: 1px solid #444444;border-radius: 6px;padding: 8px 12px;font-size: 12px;backdrop-filter: blur(5px);}
+        .leaflet-tooltip-top:before {border-top-color: #444444;}
+        .leaflet-tooltip-bottom:before {border-bottom-color: #444444;}
+        .leaflet-tooltip-left:before {border-left-color: #444444;}
+        .leaflet-tooltip-right:before {border-right-color: #444444;}
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <h3>Управление картой</h3>
+        <form name="routeForm" id="routeForm">
+            <div class="control-group">
+                <label for="deviceSelect">Устройство:</label>
+                <select name="elements" id="deviceSelect" size="1" required>
+                    <option value="">Выберите устройство...</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="dateSelect">Дата:</label>
+                <select name="date" id="dateSelect" size="1" required>
+                    <option value="">Выберите дату...</option>
+                </select>
+            </div>
+        </form>
+    </div>
+    <div class="loading" id="loading">
+        Загрузка данных...
+    </div>
+    <div class="error" id="error">
+        Ошибка загрузки данных
+    </div>
+    <div id="map"></div>
+    <script>
+        let map;
+        let currentLayers = [];
+        let CONFIG = {};
+        let mapInitialized = false;
+
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                showLoading(true);
+                
+                await loadConfig();
+                
+                console.log('CONFIG loaded');
+                
+                initializeMap();
+                populateDeviceSelect();
+                populateDateSelect();
+                setupEventListeners();
+                loadInitialRoute(); 
+            } catch (error) {
+                console.error('Error during initialization:', error);
+                showError('Ошибка инициализации приложения: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        async function loadFallbackLocation() {
+            try {
+                const timestamp = Date.now();
+                const response = await fetch(`/api/route/fallback-location?_=${timestamp}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const location = await response.json();
+                console.log('Fallback location loaded');
+                return location;
+                
+            } catch (error) {
+                console.error('Error loading fallback location:', error);
+                return { latitude: 50.0, longitude: 30.0 };
+            }
+        }
+
+        async function loadConfig() {
+            try {
+                const timestamp = Date.now();
+                const response = await fetch(`/api/route/config?_=${timestamp}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                CONFIG = await response.json();
+                
+                if (!CONFIG.devices || !Array.isArray(CONFIG.devices)) {
+                    throw new Error('Invalid configuration received from API');
+                }
+                
+                console.log('Configuration loaded successfully');
+                
+            } catch (error) {
+                console.error('Error loading configuration:', error);
+                throw new Error(`Не удалось загрузить конфигурацию: ${error.message}`);
+            }
+        }
+
+        function initializeMap() {
+            try {
+                map = L.map('map').setView([50.0, 30.0], 2);
+                
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>',
+                    maxZoom: 19
+                }).addTo(map);
+                
+                console.log('Map initialized successfully');
+            } catch (error) {
+                console.error('Error initializing map:', error);
+                showError('Ошибка инициализации карты');
+            }
+        }
+
+        function populateDeviceSelect() {
+            const deviceSelect = document.getElementById('deviceSelect');
+            
+            if (!CONFIG.devices || !Array.isArray(CONFIG.devices)) {
+                console.error('Invalid devices configuration:', CONFIG.devices);
+                showError('Ошибка конфигурации устройств');
+                return;
+            }
+            
+            CONFIG.devices.forEach(device => {
+                if (Array.isArray(device) && device.length >= 2) {
+                    const option = document.createElement('option');
+                    option.value = device[1];
+                    option.textContent = device[0];
+                    deviceSelect.appendChild(option);
+                }
+            });
+            
+            console.log('Device select populated with', CONFIG.devices.length, 'devices');
+        }
+
+        function populateDateSelect() {
+            const dateSelect = document.getElementById('dateSelect');
+            const days = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
+            const months = ['ЯНВ', 'ФЕВ', 'МАР', 'АПР', 'МАЙ', 'ИЮН', 'ИЮЛ', 'АВГ', 'СЕН', 'ОКТ', 'НОЯ', 'ДЕК'];
+            
+            const currentDate = new Date();
+            
+            for (let i = 0; i < CONFIG.numberOfDays; i++) {
+                const date = new Date(currentDate);
+                date.setDate(date.getDate() - i);
+                
+                const dayOfWeek = days[date.getDay()];
+                const day = date.getDate();
+                const monthName = months[date.getMonth()];
+                const year = date.getFullYear();
+                
+                const isoDate = `${year}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00`;
+                const displayName = `${dayOfWeek} ${day} ${monthName} ${year}`;
+                
+                const option = document.createElement('option');
+                option.value = isoDate;
+                option.textContent = displayName;
+                dateSelect.appendChild(option);
+            }
+        }
+
+        function setupEventListeners() {
+            document.getElementById('deviceSelect').addEventListener('change', handleSelectionChange);
+            document.getElementById('dateSelect').addEventListener('change', handleSelectionChange);
+        }
+
+        function handleSelectionChange() {
+            const deviceSelect = document.getElementById('deviceSelect');
+            const dateSelect = document.getElementById('dateSelect');
+            
+            if (deviceSelect.value && dateSelect.value) {
+                loadRoute(dateSelect.value, deviceSelect.value);
+            }
+        }
+
+        function loadInitialRoute() {
+            const deviceSelect = document.getElementById('deviceSelect');
+            const dateSelect = document.getElementById('dateSelect');
+            
+            if (deviceSelect.options.length > 1) {
+                deviceSelect.selectedIndex = 1;
+            }
+            if (dateSelect.options.length > 1) {
+                dateSelect.selectedIndex = 1;
+            }
+            
+            if (deviceSelect.value && dateSelect.value) {
+                loadRoute(dateSelect.value, deviceSelect.value);
+            }
+        }
+
+        async function loadRoute(date, device) {
+            showLoading(true);
+            hideError();
+            
+            try {
+                const timestamp = Date.now();
+                const url = `/api/route/history?date=${encodeURIComponent(date)}&entity_id=${encodeURIComponent(device)}&_=${timestamp}`;
+                console.log('Loading route from:', url);
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache'
+                    }
+                });
+
+                if (!response.ok) {
+                    let errorMessage = `HTTP error! status: ${response.status}`;
+                    if (response.status === 401) {
+                        errorMessage += ' - Ошибка авторизации';
+                    }
+                    throw new Error(errorMessage);
+                }
+
+                const json = await response.json();
+                console.log('API Response:', json);
+                
+                const data = json[0];
+                
+                if (data && data.length > 0) {
+                    processRouteData(data);
+                } else {
+                    await centerMapOnFallback();
+                    clearMap();
+                    showError('Нет данных для выбранной даты и устройства');
+                }
+            } catch (error) {
+                console.error('Error loading route:', error);
+                await centerMapOnFallback();
+                clearMap();
+                showError(`Ошибка загрузки: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function centerMapOnFallback() {
+            try {
+                const fallbackLocation = await loadFallbackLocation();
+                map.setView([fallbackLocation.latitude, fallbackLocation.longitude], 14);
+                mapInitialized = true;
+            } catch (error) {
+                console.error('Error centering map on fallback:', error);
+            }
+        }
+
+        function processRouteData(data) {
+            const points = [];
+            
+            data.forEach(item => {
+                try {
+                    const lat = parseFloat(item.attributes?.latitude);
+                    const lon = parseFloat(item.attributes?.longitude);
+                    const timestamp = item.last_updated;
+                    
+                    if (lat && lon && !isNaN(lat) && !isNaN(lon)) {
+                        const localDate = new Date(timestamp);
+                        const timeString = localDate.toLocaleString('ru-RU');
+                        points.push([lat, lon, timeString]);
+                    }
+                } catch (error) {
+                    console.warn('Error processing data point:', error);
+                }
+            });
+
+            console.log('Processed points:', points.length);
+
+            if (points.length === 0) {
+                clearMap();
+                showError('Не удалось извлечь координаты из данных');
+                return;
+            }
+
+            const filteredPoints = filterPointsByDistance(points);
+            console.log('Filtered points:', filteredPoints.length);
+            drawRoute(filteredPoints);
+        }
+
+        function filterPointsByDistance(points) {
+            if (points.length === 0) return [];
+            
+            const filtered = [points[0]];
+            
+            for (let i = 1; i < points.length; i++) {
+                const lastPoint = filtered[filtered.length - 1];
+                const currentPoint = points[i];
+                
+                const distance = calculateDistance(
+                    lastPoint[0], lastPoint[1],
+                    currentPoint[0], currentPoint[1]
+                );
+                
+                if (distance > CONFIG.minimalDistance) {
+                    filtered.push(currentPoint);
+                }
+            }
+            
+            return filtered;
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = toRadians(lat2 - lat1);
+            const dLon = toRadians(lon2 - lon1);
+            
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+        }
+
+        function toRadians(degrees) {
+            return degrees * (Math.PI / 180);
+        }
+
+        function drawRoute(points) {
+            clearMap();
+            
+            if (points.length === 0) return;
+
+            points.forEach((point, index) => {
+                const marker = L.marker([point[0], point[1]]).addTo(map);
+                marker.bindTooltip(`<strong>Точка ${index + 1}</strong><br>${point[2]}`, {
+                    permanent: false,
+                    direction: 'top'
+                });
+                currentLayers.push(marker);
+            });
+
+            if (points.length > 1) {
+                for (let i = 0; i < points.length - 1; i++) {
+                    const start = [points[i][0], points[i][1]];
+                    const end = [points[i + 1][0], points[i + 1][1]];
+                    
+                    const polyline = L.polyline([start, end], {
+                        color: '#ff4444',
+                        weight: 3,
+                        opacity: 0.8
+                    }).addTo(map);
+                    
+                    if (typeof L.polylineDecorator === 'function') {
+                        const decorator = L.polylineDecorator(polyline, {
+                            patterns: [{
+                                offset: '100%',
+                                repeat: 0,
+                                symbol: L.Symbol.arrowHead({
+                                    pixelSize: 15,
+                                    polygon: false,
+                                    pathOptions: {
+                                        stroke: true,
+                                        opacity: 0.8,
+                                        color: '#ff4444',
+                                        weight: 2
+                                    }
+                                })
+                            }]
+                        }).addTo(map);
+                        
+                        currentLayers.push(decorator);
+                    }
+                    
+                    currentLayers.push(polyline);
+                }
+            }
+
+            const coordinates = points.map(point => [point[0], point[1]]);
+            const bounds = L.latLngBounds(coordinates);
+            map.fitBounds(bounds, { padding: [20, 20] });
+            mapInitialized = true;
+            
+            console.log('Route drawn with', points.length, 'points');
+        }
+
+        function clearMap() {
+            currentLayers.forEach(layer => {
+                try {
+                    map.removeLayer(layer);
+                } catch (error) {
+                    console.warn('Error removing layer:', error);
+                }
+            });
+            currentLayers = [];
+        }
+
+        function showLoading(show) {
+            const loading = document.getElementById('loading');
+            loading.style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            const error = document.getElementById('error');
+            error.textContent = message;
+            error.style.display = 'block';
+            setTimeout(() => {
+                error.style.display = 'none';
+            }, 10000);
+        }
+
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
