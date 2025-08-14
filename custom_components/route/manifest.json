@@ -1,0 +1,13 @@
+{
+  "domain": "route",
+  "name": "Home Assistant Routes Tracker",
+  "version": "0.0.1",
+  "documentation": "https://github.com/webstudiobond/ha_route_tracker",
+  "requirements": ["aiofiles>=23.0.0"],
+  "codeowners": [
+    "@webstudiobond"
+  ],
+  "iot_class": "local_polling",
+  "integration_type": "helper",
+  "config_flow": false
+}
