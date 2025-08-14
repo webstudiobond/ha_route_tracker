@@ -4,6 +4,8 @@
 
 Компонент для отслеживания и визуализации маршрутов устройств в Home Assistant. Основан на [ha_routes mavrikkk](https://github.com/mavrikkk/ha_routes)
 
+Используются: библиотека [Leaflet](https://app.unpkg.com/leaflet@1.9.4/files/dist), а также плагин [leaflet.polylineDecorator.js](https://raw.githubusercontent.com/bbecquet/Leaflet.PolylineDecorator/refs/heads/master/dist/leaflet.polylineDecorator.js)
+
 > :warning: **ВНИМАНИЕ:**  
 >
 > Не рекомендуется использовать в недоверенной сети!
