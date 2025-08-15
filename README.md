@@ -66,7 +66,14 @@ route:
 
 **Пример для nginx**
 ```
-location /local/ {
+# Upgrade WebSocket if requested, otherwise use keepalive
+map $http_upgrade $connection_upgrade_keepalive {
+    default upgrade;
+    ''      '';
+}
+server {
+...
+  location /local/ {
         allow 192.168.100.7; # локальная сеть
         allow 1.2.3.4; # ваш внешний белый IP (это может быть, например, ваш IP своего VPN)
         deny all;
@@ -81,8 +88,8 @@ location /local/ {
         proxy_http_version  1.1;
         proxy_set_header    Upgrade             $http_upgrade;
         proxy_set_header    Connection          $connection_upgrade_keepalive;
-    }
-location / {
+  }
+  location / {
         proxy_pass http://127.0.0.1:8123;
         proxy_redirect      off;
         proxy_set_header    X-Real-IP           $remote_addr;
@@ -93,5 +100,7 @@ location / {
         proxy_http_version  1.1;
         proxy_set_header    Upgrade             $http_upgrade;
         proxy_set_header    Connection          $connection_upgrade_keepalive;
-    }
+  }
+...
+}
 ```
