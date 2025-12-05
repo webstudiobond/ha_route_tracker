@@ -89,11 +89,11 @@ async def async_setup_route(hass: HomeAssistant, config: dict[str, Any]) -> None
 
     frontend.async_register_built_in_panel(
         hass,
-        "iframe",
-        "Routes",
-        "mdi:routes",
-        "myroute",
-        {"url": "/local/route"},
+        component_name="iframe",
+        sidebar_title="Routes",
+        sidebar_icon="mdi:routes",
+        frontend_url_path="myroute",  # <--- Было url_path, стало frontend_url_path
+        config={"url": "/local/route"},
         require_admin=False,
     )
 
